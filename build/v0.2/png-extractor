@@ -1,0 +1,23 @@
+#!/bin/bash
+
+# PNG-Extractor
+# Made by Cationzi3r
+# At 5:50 PM
+# On Jul 5 2020
+
+target_dump="dump.hex"
+dump_temp="dump.hex.temp"
+hexdump -e '16/1 "%02x " " "' $1 > $dump_temp
+sed ':a;N;$!ba;s/\n/ /g' $dump_temp > $target_dump 
+sed -i -e 's/* //g' $target_dump 
+rm -f $dump_temp
+
+./separator.py
+rm -f $target_dump
+
+for hex_file in *.hex ; do
+	IFS='.' read -ra file_name <<< $hex_file
+	xxd -r $hex_file > "$file_name.png"
+done
+rm -f *.hex
+

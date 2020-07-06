@@ -1,0 +1,174 @@
+#!/bin/bash
+
+# Empty arguments
+if [[ $# < 1 ]]; then
+	echo "Err: No arguments provided. Try pngdump --help for more information"
+	exit
+fi
+
+# Predefining switches (default values)
+display_help=false
+display_version=false
+one_indexed=false
+dump_path="."
+prefix=""
+suffix=".png"
+
+# Processing switches
+skip_next=false
+file_start=$(($# + 1))
+for (( i=1; i<=$#; ++i )); do
+	arg=${@:$i:1}
+
+	if $skip_next; then
+		skip_next=false
+		continue
+	fi
+
+	# The middle arguments is not a switch? Hopefully anything else from that will be a file
+	if [[ ${arg:0:1} != "-" ]]; then
+		file_start=$i
+		break
+	fi
+
+	# Long switches (--switch), alone by themselves
+	if [[ $arg == "--help" ]]; then
+		display_help=true
+		continue
+	elif [[ $arg == "--version" ]]; then
+		display_version=true
+		continue
+	elif [[ $arg == "--prefix" ]]; then
+		prefix=${@:$i+1:1}
+		skip_next=true
+		continue
+	elif [[ $arg == "--suffix" ]]; then
+		suffix=${@:$i+1:1}
+		skip_next=true
+		continue
+	elif [[ $arg == "--dump-path" ]]; then
+		dump_path=${@:$i+1:1}
+		skip_next=true
+		continue
+	elif [[ ${arg:0:2} == "--" ]]; then
+		echo "Err: Invalid switches. Try pngdump --help for more information";
+		exit
+	fi
+
+	# Short switches (-s), can sit nexts to each other :)
+	for (( j=1; j<${#arg}; j++ )); do
+		if [[ ${arg:$j:1} == "h" ]]; then display_help=true
+		elif [[ ${arg:$j:1} == "v" ]]; then display_version=true
+		elif [[ ${arg:$j:1} == "1" ]]; then one_indexed=true
+		elif [[ ${arg:$j:1} == "p" ]]; then
+			prefix=${@:$i+1:1}
+			skip_next=true
+		elif [[ ${arg:$j:1} == "s" ]]; then
+			suffix=${@:$i+1:1}
+			skip_next=true
+		elif [[ ${arg:$j:1} == "d" ]]; then
+			dump_path=${@:$i+1:1}
+			skip_next=true
+		else
+			echo "Err: Invalid switches. Try pngdump --help for more information";
+			exit
+		fi
+	done
+done
+
+# When the loop ends but that skip_next is still true means missing argument
+if $skip_next; then
+	echo "Err: Missing arguments. Try pngdump --help for more information";
+	exit
+fi
+
+# Quick debug
+# echo "display_help: $display_help"
+# echo "display_version: $display_version"
+# echo "one_indexed: $one_indexed"
+# echo "dump_path: $dump_path"
+# echo "prefix: $prefix"
+# echo "suffix: $suffix"
+# echo
+
+# Print help
+if $display_help; then
+	echo "Usage: pngdump [switches] [files]"
+	echo -n "pngdump is a tool used to extract unencrypted, uncompressed chunks of data (containing"
+	echo " PNG signature) from files (such as game data, joined pictures)"
+	echo
+	echo "  -h, --help        Display this summary"
+	echo "  -v, --version     Display current version"
+	echo "  -d, --dump-path   Change dumping path, default: \".\""
+	echo "  -p, --prefix      Change dumped files's prefix, default: \"\""
+	echo "  -s, --suffix      Change dumped files's suffix, default: \".png\""
+	echo "  -1                Files will be indexed from 1, default is 0"
+	exit
+fi
+
+# Print version
+if $display_version; then
+	echo "pngdump v1.0"
+	echo "by Cationiz3r "
+	echo "on Jul 6 2020 (@1:22PM)"
+	exit
+fi
+
+# Create path for temporary files
+temp_path="/tmp/pngdump/"
+mkdir -p $temp_path
+
+# Predefining...
+target_dump="dump"
+dump_temp="dump.1"
+
+# Separate path for (possible) mutile files
+multi=false
+if [[ $# > $file_start ]]; then
+	multi=true
+# No input files
+elif [[ $# < $file_start ]]; then
+	echo "Err: Files not provided. Try pngdump --help for more information";
+	exit
+fi
+
+# Processing files
+for (( i=file_start; i<=$#; ++i )); do
+	# Current target: ${@:$i:1}
+
+	echo "Processing ${@:$i:1}..."
+	if [ ! -f ${@:$i:1} ]; then
+    	echo "  File doesn't exist!"
+		continue
+	fi
+
+	# Separate path inside dump path for multiple files
+	multi_path=""
+	if $multi; then multi_path="${@:$i:1}-dump"; fi
+
+	# Dumping all the hex values onto a single line of a file
+	echo -n "  Dumping hex values... "
+	hexdump -e '16/1 "%02x " " "' ${@:$i:1} > $temp_path$dump_temp
+	sed ':a;N;$!ba;s/\n/ /g' $temp_path$dump_temp > $temp_path$target_dump
+	sed -i -e 's/* //g' $temp_path$target_dump
+	# rm -f $temp_path$dump_temp
+	echo "Done!"
+
+	# Separate indiviual chunks starting with ".PNG"
+	echo -n "  Separating PNG chunks... " # Better displaying to be implemented in Python script
+	./separator.py $temp_path $target_dump $one_indexed
+	# rm -f $temp_path$target_dump
+	echo "Done!"
+
+	echo -n "  Revesing separated hex dumps... "
+	for hex_file in $temp_path*.hex ; do
+		IFS='.' read -ra temp_file_name <<< $hex_file
+		xxd -r $hex_file > $temp_file_name.png
+		mkdir -p $dump_path/$multi_path
+		mv $temp_file_name.png $dump_path/$multi_path/$prefix$(basename $temp_file_name)$suffix
+	done
+	echo "Done!"
+done
+
+# Deleting path for temporary files
+rm -rf $temp_path
